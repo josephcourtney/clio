@@ -74,9 +74,13 @@ def test_output_from_binaryio(tmp_path):
 
 
 def test_output_from_path_to_clipboard(monkeypatch):
+    # Use context manager for NamedTemporaryFile to satisfy SIM115
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        f = Path(tmp.name)
+        tmp_name = tmp.name
+
+    f = Path(tmp_name)
     f.write_text("from path")
+
     monkeypatch.setattr("clio.clipboard.pyperclip.copy", lambda x: setattr(sys.modules[__name__], "_clip", x))
     monkeypatch.setattr("clio.clipboard.pyperclip.paste", lambda: getattr(sys.modules[__name__], "_clip", ""))
     write_output(f, dest="clipboard")
@@ -94,3 +98,10 @@ def test_write_output_invalid_type():
 def test_resolve_output_path_missing_name():
     with pytest.raises(ValueError, match="Must provide a file name"):
         resolve_output_path(None)
+
+
+def test_write_output_file_dash_writes_stdout(monkeypatch):
+    buffer = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buffer)
+    write_output("HELLO-DASH", dest="file", name="-")
+    assert buffer.getvalue() == "HELLO-DASH"
