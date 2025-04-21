@@ -121,3 +121,40 @@ Run it:
 export DATA_PATH="myfile.txt"
 python script.py --infile DATA_PATH --outfile result.txt
 ```
+
+---
+
+## 🧩 Example: Using `@command_with_io` Decorator
+
+You can simplify CLI creation by decorating your function with `@command_with_io`.
+
+```python
+from clio.click_utils import command_with_io
+
+@command_with_io
+def shout(text: str) -> str:
+    """Receives input and returns it uppercased."""
+    return text.upper()
+```
+
+Save it as `shout.py` and run:
+
+```bash
+echo "hello from stdin" | python shout.py
+# → HELLO FROM STDIN
+```
+
+Or use other sources:
+
+```bash
+export MESSAGE="hello from env"
+python shout.py --input-source env --input-name MESSAGE
+# → HELLO FROM ENV
+```
+
+---
+
+## 🔧 Tip: Customize Your CLI
+
+- Add more CLI flags via `click` decorators above `@command_with_io`
+- The decorator supports all clio I/O options automatically

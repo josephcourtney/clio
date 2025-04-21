@@ -1,6 +1,6 @@
 try:
     import pyperclip
-except ImportError:
+except ImportError:  # pragma: no cover
     pyperclip = None
 
 

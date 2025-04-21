@@ -7,27 +7,31 @@ from typing import BinaryIO, TextIO
 import click
 from click import ClickException
 
+from .__version__ import __version__
 from .input import Source, TypeName, get_input
-from .output import OutputDest, write_output
+from .output import OutputDest, resolve_output_path, write_output
 
-# Respect SIGPIPE so 'clio … | head' quits silently instead of a Python traceback
+# Respect SIGPIPE so that `clio | head` quits silently instead of a Python traceback
 _ = signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-
 
 __all__ = ("command_with_io",)
 
+type DataType = str | bytes | Path | TextIO | BinaryIO
 
-def command_with_io(
-    func: Callable[[str | bytes | Path | TextIO | BinaryIO], str | bytes | Path | TextIO | BinaryIO],
-) -> click.Command:
-    """Decorate a function to make it into an enhanced Click command.
 
-    Turn a single-argument function into a Click command
-    that reads from one of Source, passes the deserialized object in,
-    and writes the function's return value to one of OutputDest.
+def command_with_io(func: Callable[..., DataType]) -> click.Command:
+    """
+    Decorate a function into a Click command with automatic I/O handling.
+
+    Adds:
+      - a `--version` flag (pulled from __version__.py)
+      - a `--force` option to overwrite existing files
+      - broad exception handling so any unexpected exception
+        becomes a clean ClickException
     """
 
     @click.command()
+    @click.version_option(version=__version__)
     @click.option(
         "--input-source",
         "input_source",
@@ -42,7 +46,7 @@ def command_with_io(
         type=click.Path(exists=False, allow_dash=True),
         default="-",
         show_default=True,
-        help="Name for input (e.g. env var, file path, or '-' for stdin).",
+        help="Name for input (env var, file path, or '-' for stdin).",
     )
     @click.option(
         "--input-type",
@@ -68,47 +72,53 @@ def command_with_io(
         show_default=True,
         help="Name for output (env var name or file path, or '-' for stdout).",
     )
+    @click.option(
+        "--force",
+        is_flag=True,
+        default=False,
+        help="Overwrite existing output files when using file output.",
+    )
     @wraps(func)
     def wrapper(
-        input_source: Source, input_name: str, input_type: TypeName, output_dest: OutputDest, output_name: str
+        input_source: str,
+        input_name: str,
+        input_type: str,
+        output_dest: str,
+        output_name: str,
+        *,
+        force: bool,
     ) -> None:
-        # Convert strings back into your enums, with clean error messages.
+        def _wrap_error(err: Exception) -> None:
+            raise ClickException(str(err)) from err
+
         try:
+            # Parse enum values
             src = Source(input_source)
-        except ValueError as e:
-            msg = f"Invalid input source: {input_source}"
-            raise ClickException(msg) from e
-
-        try:
             typ = TypeName(input_type)
-        except ValueError as e:
-            msg = f"Invalid input type: {input_type}"
-            raise ClickException(msg) from e
-
-        try:
             dest = OutputDest(output_dest)
-        except ValueError as e:
-            msg = f"Invalid output destination: {output_dest}"
-            raise ClickException(msg) from e
 
-        # Read in the data
-        try:
+            # Read in the data
             data = get_input(src, name=input_name, as_type=typ)
-        except Exception as e:
-            raise ClickException(str(e)) from e
+            # Run the user's function
+            result = func(data)
 
-        # Call the user's function
-        result = func(data)
+            # Validate return type
+            if not isinstance(result, str | bytes | Path) and not hasattr(result, "read"):
+                _wrap_error(TypeError(f"Unsupported return type: {type(result)}"))
 
-        # Validate the return type
-        if not isinstance(result, (str | bytes | Path)) and not hasattr(result, "read"):
-            msg = f"Unsupported return type: {type(result)}"
-            raise ClickException(msg)
+            # Handle --force when writing to a file
+            if dest is OutputDest.FILE and output_name not in {None, "-"}:
+                path = resolve_output_path(output_name, force=force)
+                output_name = str(path)
 
-        # Write it out
-        try:
+            # Write the output
             write_output(result, dest=dest, name=output_name)
-        except Exception as e:
-            raise ClickException(str(e)) from e
+
+        except ClickException:
+            # Propagate expected CLI errors
+            raise
+        except Exception as err:  # noqa: BLE001
+            # Wrap all other exceptions for a clean CLI error
+            _wrap_error(err)
 
     return wrapper

@@ -1,4 +1,5 @@
 import atexit
+import contextlib
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -21,5 +22,10 @@ def persist_to_tempfile(
         _ = f.write(data)
         f.flush()
         temp_path = Path(f.name).resolve()
-    _ = atexit.register(temp_path.unlink)
+
+    def _cleanup(path: Path) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+
+    _ = atexit.register(_cleanup, temp_path)
     return temp_path

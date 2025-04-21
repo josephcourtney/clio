@@ -30,22 +30,42 @@ class TypeName(StrEnum):
 Reader = Callable[[Source, str | None], str | bytes | TextIO | BinaryIO | Path]
 
 
-def _read_str(source: Source, name: str | None) -> str:
-    if source in {Source.ARG, Source.ENV, Source.FILE, Source.SIGNAL} and not name:
+def _read_str(source: Source, name: str | None) -> str:  # noqa: C901
+    if source in {Source.ARG, Source.ENV, Source.FILE, Source.SIGNAL} and name is None:
         msg = f"Missing name for source '{source}'"
         raise ValueError(msg)
 
-    if name is None:
-        msg = f"Missing name for source: {source}"
-        raise ValueError(msg)
+    def _f_arg():
+        if name is None:
+            msg = "Missing name for signal source"
+            raise ValueError(msg)
+        return sys.argv[int(name)]
+
+    def _f_env():
+        if name is None:
+            msg = "Missing name for signal source"
+            raise ValueError(msg)
+        return os.environ[name]
+
+    def _f_file():
+        if name is None:
+            msg = "Missing name for signal source"
+            raise ValueError(msg)
+        return Path(name).read_text(encoding="utf-8")
+
+    def _f_signal():
+        if name is None:
+            msg = "Missing name for signal source"
+            raise ValueError(msg)
+        return wait_for_signal(int(name))
 
     dispatch: dict[Source, Callable[[], str]] = {
-        Source.ARG: lambda: sys.argv[int(name)],
-        Source.ENV: lambda: os.environ[name],
-        Source.FILE: lambda: Path(name).read_text(encoding="utf-8"),
+        Source.ARG: _f_arg,
+        Source.ENV: _f_env,
+        Source.FILE: _f_file,
         Source.PIPE: sys.stdin.read,
         Source.CLIPBOARD: read_clipboard,
-        Source.SIGNAL: lambda: wait_for_signal(int(name)),
+        Source.SIGNAL: _f_signal,
     }
 
     try:
@@ -56,6 +76,10 @@ def _read_str(source: Source, name: str | None) -> str:
 
 
 def _read_bytes(source: Source, name: str | None) -> bytes:
+    if source in {Source.ARG, Source.ENV, Source.FILE, Source.SIGNAL} and name is None:
+        msg = f"Missing name for source '{source}'"
+        raise ValueError(msg)
+
     text = _read_str(source, name)
     path = Path(text)
     if path.is_file():
@@ -105,12 +129,16 @@ def _open_bufferedio(source: Source, name: str | None) -> BinaryIO:
 
 
 def _read_path(source: Source, name: str | None) -> Path:
+    if source in {Source.ARG, Source.ENV, Source.FILE, Source.SIGNAL} and name is None:
+        msg = f"Missing name for source '{source}'"
+        raise ValueError(msg)
+
     if source == Source.PIPE:
         content = sys.stdin.read()
         return persist_to_tempfile(content, mode="w")
     if source == Source.FILE:
         if name is None:
-            msg = "Missing name for path file source"
+            msg = "Missing name for signal source"
             raise ValueError(msg)
         return Path(name).resolve()
     if source in {Source.ENV, Source.ARG}:
@@ -120,11 +148,8 @@ def _read_path(source: Source, name: str | None) -> Path:
         raw = read_clipboard()
         return persist_to_tempfile(raw, mode="w")
     if source == Source.SIGNAL:
-        if name is None:
-            msg = "Missing name for path signal source"
-            raise ValueError(msg)
-        raw = wait_for_signal(int(name))
-        return persist_to_tempfile(raw, mode="w")
+        msg = f"Unsupported source for path: {source}"
+        raise ValueError(msg)
     msg = f"Unsupported source for path: {source}"
     raise ValueError(msg)
 
